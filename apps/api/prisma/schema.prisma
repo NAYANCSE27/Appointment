@@ -1,0 +1,438 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  PATIENT
+  PROVIDER
+  ADMIN
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+  NO_SHOW
+  RESCHEDULED
+}
+
+enum DayOfWeek {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+}
+
+enum ExceptionType {
+  VACATION
+  SICK_LEAVE
+  TRAINING
+  HOLIDAY
+  CUSTOM
+}
+
+enum NotificationChannel {
+  EMAIL
+  SMS
+  IN_APP
+}
+
+enum NotificationType {
+  BOOKING_CONFIRMATION
+  BOOKING_REMINDER_24H
+  BOOKING_REMINDER_1H
+  BOOKING_CANCELLATION
+  BOOKING_RESCHEDULED
+  PROVIDER_WELCOME
+  PATIENT_WELCOME
+  PASSWORD_RESET
+}
+
+enum JobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  RETRYING
+}
+
+model Tenant {
+  id                      String   @id @default(uuid())
+  name                    String
+  slug                    String   @unique
+  address                 String?
+  phone                   String?
+  email                   String?
+  timezone                String   @default("UTC")
+  logoUrl                 String?
+  cancellationNoticeHours Int      @default(24)
+  smsEnabled              Boolean  @default(false)
+  calendarSyncEnabled     Boolean  @default(true)
+  guestBookingEnabled     Boolean  @default(true)
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  users                 User[]
+  services              Service[]
+  appointments          Appointment[]
+  holidays              ClinicHoliday[]
+  notificationTemplates NotificationTemplate[]
+  auditLogs             AuditLog[]
+  rooms                 Room[]
+  workingHours          ClinicWorkingHours[]
+
+  @@map("tenants")
+}
+
+model User {
+  id                  String    @id @default(uuid())
+  tenantId            String
+  email               String
+  passwordHash        String
+  firstName           String
+  lastName            String
+  phone               String?
+  dateOfBirth         DateTime?
+  role                Role      @default(PATIENT)
+  isEmailVerified     Boolean   @default(false)
+  isActive            Boolean   @default(true)
+  profilePhotoUrl     String?
+  emailVerifyToken    String?
+  emailVerifyExpiry   DateTime?
+  passwordResetToken  String?
+  passwordResetExpiry DateTime?
+  failedLoginAttempts Int       @default(0)
+  lockedUntil         DateTime?
+  notifyByEmail       Boolean   @default(true)
+  notifyBySms         Boolean   @default(false)
+  encryptedNotes      String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  deletedAt           DateTime?
+
+  tenant              Tenant                   @relation(fields: [tenantId], references: [id])
+  provider            Provider?
+  refreshTokens       RefreshToken[]
+  oauthTokens         OAuthToken[]
+  patientAppointments Appointment[]            @relation("PatientAppointments")
+  auditLogsAsActor    AuditLog[]               @relation("AuditActor")
+  notificationPrefs   NotificationPreference[]
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+  @@index([email])
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  isRevoked Boolean  @default(false)
+  createdAt DateTime @default(now())
+  userAgent String?
+  ipAddress String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model OAuthToken {
+  id                    String   @id @default(uuid())
+  userId                String
+  provider              String
+  encryptedAccessToken  String
+  encryptedRefreshToken String
+  accessTokenExpiry     DateTime
+  scope                 String
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider])
+  @@map("oauth_tokens")
+}
+
+model Provider {
+  id                 String   @id @default(uuid())
+  userId             String   @unique
+  tenantId           String
+  specialty          String
+  licenseNumber      String?
+  bio                String?
+  appointmentBuffer  Int      @default(10)
+  minimumNoticeHours Int      @default(2)
+  isActive           Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  user            User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  weeklySchedules ProviderWeeklySchedule[]
+  exceptions      ProviderException[]
+  appointments    Appointment[]            @relation("ProviderAppointments")
+  services        ProviderService[]
+  rooms           ProviderRoom[]
+
+  @@index([tenantId])
+  @@map("providers")
+}
+
+model ProviderWeeklySchedule {
+  id         String    @id @default(uuid())
+  providerId String
+  dayOfWeek  DayOfWeek
+  startTime  String
+  endTime    String
+  isActive   Boolean   @default(true)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  provider Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@index([providerId])
+  @@map("provider_weekly_schedules")
+}
+
+model ProviderException {
+  id         String        @id @default(uuid())
+  providerId String
+  type       ExceptionType
+  startDate  DateTime
+  endDate    DateTime
+  startTime  String?
+  endTime    String?
+  reason     String?
+  createdAt  DateTime      @default(now())
+
+  provider Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@index([providerId])
+  @@index([startDate, endDate])
+  @@map("provider_exceptions")
+}
+
+model Service {
+  id           String   @id @default(uuid())
+  tenantId     String
+  name         String
+  description  String?
+  category     String
+  durationMins Int
+  priceDecimal Decimal  @db.Decimal(10, 2)
+  color        String   @default("#4A90E2")
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tenant       Tenant            @relation(fields: [tenantId], references: [id])
+  providers    ProviderService[]
+  appointments Appointment[]
+
+  @@index([tenantId])
+  @@map("services")
+}
+
+model ProviderService {
+  providerId String
+  serviceId  String
+  assignedAt DateTime @default(now())
+
+  provider Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  service  Service  @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@id([providerId, serviceId])
+  @@map("provider_services")
+}
+
+model Room {
+  id          String  @id @default(uuid())
+  tenantId    String
+  name        String
+  description String?
+  isActive    Boolean @default(true)
+
+  tenant       Tenant         @relation(fields: [tenantId], references: [id])
+  providers    ProviderRoom[]
+  appointments Appointment[]
+
+  @@index([tenantId])
+  @@map("rooms")
+}
+
+model ProviderRoom {
+  providerId String
+  roomId     String
+
+  provider Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  room     Room     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@id([providerId, roomId])
+  @@map("provider_rooms")
+}
+
+model Appointment {
+  id                    String            @id @default(uuid())
+  tenantId              String
+  bookingRef            String            @unique
+  patientId             String
+  providerId            String
+  serviceId             String
+  roomId                String?
+  startTime             DateTime
+  endTime               DateTime
+  status                AppointmentStatus @default(PENDING)
+  patientNotes          String?
+  patientTimezone       String            @default("UTC")
+  priceSnapshot         Decimal           @db.Decimal(10, 2)
+  idempotencyKey        String?
+  cancelledAt           DateTime?
+  cancelledBy           String?
+  cancelReason          String?
+  rescheduledFrom       String?
+  googleEventId         String?
+  googleEventIdProvider String?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  tenant           Tenant                    @relation(fields: [tenantId], references: [id])
+  patient          User                      @relation("PatientAppointments", fields: [patientId], references: [id])
+  provider         Provider                  @relation("ProviderAppointments", fields: [providerId], references: [id])
+  service          Service                   @relation(fields: [serviceId], references: [id])
+  room             Room?                     @relation(fields: [roomId], references: [id])
+  consultationNote ConsultationNote?
+  notifications    AppointmentNotification[]
+
+  @@index([tenantId])
+  @@index([patientId])
+  @@index([providerId])
+  @@index([startTime])
+  @@index([status])
+  @@map("appointments")
+}
+
+model ConsultationNote {
+  id                  String   @id @default(uuid())
+  appointmentId       String   @unique
+  authorId            String
+  encryptedContent    String
+  isSharedWithPatient Boolean  @default(false)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  @@map("consultation_notes")
+}
+
+model ClinicWorkingHours {
+  id        String    @id @default(uuid())
+  tenantId  String
+  dayOfWeek DayOfWeek
+  openTime  String
+  closeTime String
+  isClosed  Boolean   @default(false)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, dayOfWeek])
+  @@map("clinic_working_hours")
+}
+
+model ClinicHoliday {
+  id        String   @id @default(uuid())
+  tenantId  String
+  date      DateTime
+  name      String
+  createdAt DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, date])
+  @@map("clinic_holidays")
+}
+
+model NotificationTemplate {
+  id        String              @id @default(uuid())
+  tenantId  String
+  type      NotificationType
+  channel   NotificationChannel
+  subject   String?
+  bodyHtml  String?
+  bodySms   String?
+  variables Json
+  updatedAt DateTime            @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, type, channel])
+  @@map("notification_templates")
+}
+
+model AppointmentNotification {
+  id              String              @id @default(uuid())
+  appointmentId   String
+  type            NotificationType
+  channel         NotificationChannel
+  recipientUserId String
+  status          JobStatus           @default(PENDING)
+  scheduledFor    DateTime
+  sentAt          DateTime?
+  failureReason   String?
+  retryCount      Int                 @default(0)
+  externalId      String?
+
+  appointment Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  @@index([appointmentId])
+  @@index([scheduledFor])
+  @@map("appointment_notifications")
+}
+
+model NotificationPreference {
+  id        String              @id @default(uuid())
+  userId    String
+  channel   NotificationChannel
+  isEnabled Boolean             @default(true)
+  updatedAt DateTime            @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, channel])
+  @@map("notification_preferences")
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  tenantId    String
+  actorId     String?
+  actorRole   Role?
+  action      String
+  entityType  String
+  entityId    String
+  beforeState Json?
+  afterState  Json?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  actor  User?  @relation("AuditActor", fields: [actorId], references: [id])
+
+  @@index([tenantId])
+  @@index([entityType, entityId])
+  @@index([actorId])
+  @@map("audit_logs")
+}
