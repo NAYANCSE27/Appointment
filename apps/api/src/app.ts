@@ -10,6 +10,10 @@ import { errorHandler } from './middleware/errorHandler';
 import { authRouter } from './modules/auth';
 import { usersRouter } from './modules/users';
 import { adminRouter } from './modules/admin';
+import { servicesRouter } from './modules/services';
+import { providersRouter } from './modules/providers';
+import { availabilityRouter } from './modules/availability';
+import { appointmentsRouter } from './modules/appointments';
 
 export function createApp() {
   const app = express();
@@ -45,6 +49,10 @@ export function createApp() {
   app.use('/api/v1/auth', authRouter);
   app.use('/api/v1/users', usersRouter);
   app.use('/api/v1/admin', adminRouter);
+  app.use('/api/v1/services', servicesRouter);
+  app.use('/api/v1/providers', providersRouter);
+  app.use('/api/v1/availability', availabilityRouter);
+  app.use('/api/v1/appointments', appointmentsRouter);
 
   // Error handler (MUST be last)
   app.use(errorHandler);
